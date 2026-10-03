@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mouse Maze Adventure</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background-color:#fff3cf;("geronimo-stilton.jpg");color:#3b2a14;font-family:Georgia,serif;touch-action:none;overflow:hidden}
+body{display:flex;flex-direction:column;align-items:center}
+#hud{width:100%;max-width:520px;display:flex;justify-content:space-between;padding:8px 14px;font-weight:bold;font-size:1.05rem}
+canvas{border-radius:12px;box-shadow:0 3px 10px #0004}
+#pad{display:none;grid-template-columns:repeat(3,60px);grid-template-rows:repeat(2,60px);gap:6px;margin-top:10px}
+#pad button{font-size:1.5rem;border:0;border-radius:14px;background:#e8890c;color:#fff}
+#pad .u{grid-column:2}
+@media (pointer:coarse){#pad{display:grid}}
+#msg{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;background:#fff3cfee}
+#msg h1{margin:0 0 8px}
+#go{margin-top:14px;font:inherit;font-size:1.2rem;padding:12px 30px;border:0;border-radius:30px;background:#e8890c;color:#fff;cursor:pointer}
+@media (prefers-color-scheme:dark){html,body{background-color:#1d1608;color:#f7e8c4}#msg{background:#1d1608ee}}
+</style>
+</head>
+<body>
+<div id="hud"><span id="a"></span><span id="b"></span><span id="d"></span></div>
+<canvas id="c"></canvas>
+<div id="pad"><button class="u" data-k="u">⬆️</button><button data-k="l">⬅️</button><button data-k="d">⬇️</button><button data-k="r">➡️</button></div>
+<div id="msg"><h1 id="h">🐭 Mouse Maze Adventure</h1><p id="p">Geronimo Stilton is lost in the Cheddar Catacombs! Eat <b>all the cheese</b> to unlock the 🚪, but dodge the prowling cats 🐈.<br><br>Arrow keys / WASD, swipe, or the buttons.</p><button id="go">Start</button></div>
+<script>
+var MAPS=[[
+"###########",
+"#P..#....E#",
+"#.#.#.##.##",
+"#.#...#...#",
+"#.####.##.#",
+"#....C....#",
+"#.##.###.##",
+"#.#..#....#",
+"#.#.##.##.#",
+"#...#..#..#",
+"###########"],[
+"###########",
+"#P...#...E#",
+"#.##.#.##.#",
+"#.#..C..#.#",
+"#.#.###.#.#",
+"#...#.#...#",
+"###.#.#.###",
+"#...#C#...#",
+"#.###.###.#",
+"#.........#",
+"###########"],[
+"###########",
+"#P..#...C.#",
+"#.#.#.###.#",
+"#.#...#...#",
+"#.#####.#.#",
+"#C......#.#",
+"#.#####.#.#",
+"#.#...#..C#",
+"#.#.#.#.###",
+"#...#...E.#",
+"###########"]];
+var SPD=[520,430,350];
+var cv=document.getElementById("c"),x=cv.getContext("2d");
+var L=0,score=0,lives=3,run=false,T=30,R,C,wall,cheese,left,me,st,cats,ex,inv=0,acc=0,last=0,lastMove=0,onGo;
+function $(i){return document.getElementById(i)}
+function load(n){
+ var m=MAPS[n];R=m.length;C=m[0].length;wall=[];cheese=[];cats=[];left=0;
+ for(var r=0;r<R;r++){wall[r]=[];cheese[r]=[];for(var c=0;c<C;c++){
+  var ch=m[r][c];wall[r][c]=ch==="#";cheese[r][c]=false;
+  if(ch==="P")me={r:r,c:c};
+  if(ch==="C")cats.push({r:r,c:c,sr:r,sc:c});
+  if(ch==="E")ex={r:r,c:c};
+ }}
+ st={r:me.r,c:me.c};
+ var seen={},q=[[me.r,me.c]];seen[me.r+","+me.c]=1;
+ while(q.length){var p=q.shift();[[1,0],[-1,0],[0,1],[0,-1]].forEach(function(d){var a=p[0]+d[0],b=p[1]+d[1];if(!wall[a][b]&&!seen[a+","+b]){seen[a+","+b]=1;q.push([a,b])}})}
+ for(r=0;r<R;r++)for(c=0;c<C;c++)if(seen[r+","+c]&&!wall[r][c]&&!(r===me.r&&c===me.c)&&!(r===ex.r&&c===ex.c)){cheese[r][c]=true;left++}
+ size();
+}
+function size(){
+ if(!R)return;
+ var coarse=matchMedia("(pointer:coarse)").matches;
+ var w=innerWidth-16,h=innerHeight-(coarse?230:90);
+ T=Math.max(16,Math.floor(Math.min(w/C,h/R,48)));
+ cv.width=T*C;cv.height=T*R;draw();
+}
+addEventListener("resize",size);
+function show(h,p,b,fn){$("h").textContent=h;$("p").innerHTML=p;$("go").textContent=b;onGo=fn;$("msg").style.display="flex";run=false}
+$("go").onclick=function(){onGo()};
+function begin(){L=0;score=0;lives=3;level()}
+function level(){load(L);$("msg").style.display="none";run=true;inv=0;acc=0;last=performance.now();requestAnimationFrame(loop)}
+function move(dr,dc){
+ if(!run)return;
+ var now=performance.now();if(now-lastMove<100)return;lastMove=now;
+ var nr=me.r+dr,nc=me.c+dc;if(wall[nr][nc])return;
+ me.r=nr;me.c=nc;
+ if(cheese[nr][nc]){cheese[nr][nc]=false;left--;score+=10}
+ if(left===0&&nr===ex.r&&nc===ex.c){score+=50+lives*20;L++;
+  if(L>=MAPS.length)return show("🏆 You escaped!","You cleared all "+MAPS.length+" mazes!<br>Final score: <b>"+score+"</b>","Play again",begin);
+  return show("🎉 Level "+L+" clear!","Score: <b>"+score+"</b><br>The next maze has faster cats...","Next level",level)}
+ hit();hud();draw();
+}
+function catTick(){
+ cats.forEach(function(k){
+  var o=[[1,0],[-1,0],[0,1],[0,-1]].filter(function(d){return !wall[k.r+d[0]][k.c+d[1]]});
+  var best=o[0],bd=1e9;
+  o.forEach(function(d){var v=Math.abs(k.r+d[0]-me.r)+Math.abs(k.c+d[1]-me.c);if(v<bd){bd=v;best=d}});
+  var pick=Math.random()<.65?best:o[Math.floor(Math.random()*o.length)];
+  k.r+=pick[0];k.c+=pick[1];
+ });
+ hit();
+}
+function hit(){
+ if(inv>0)return;
+ if(cats.some(function(k){return k.r===me.r&&k.c===me.c})){
+  lives--;inv=1.5;me={r:st.r,c:st.c};cats.forEach(function(k){k.r=k.sr;k.c=k.sc});
+  if(lives<=0)show("😿 Caught!","Final score: <b>"+score+"</b>","Try again",begin);
+ }
+}
+function loop(t){
+ if(!run)return;
+ var dt=Math.min(t-last,100);last=t;
+ if(inv>0)inv-=dt/1000;
+ acc+=dt;if(acc>=SPD[L]){acc=0;catTick()}
+ hud();draw();requestAnimationFrame(loop);
+}
+function hud(){$("a").textContent="Level "+(L+1);$("b").textContent="🧀 "+left+" left · ⭐ "+score;$("d").textContent="❤️".repeat(Math.max(lives,0))}
+function draw(){
+ x.fillStyle="#ffe9a8";x.fillRect(0,0,cv.width,cv.height);
+ x.textAlign="center";x.textBaseline="middle";
+ for(var r=0;r<R;r++)for(var c=0;c<C;c++){
+  if(wall[r][c]){x.fillStyle="#7a4b1e";x.fillRect(c*T,r*T,T,T);x.fillStyle="#9a6a33";x.fillRect(c*T+2,r*T+2,T-4,T-4)}
+  else if(cheese[r][c]){x.font=(T*.55)+"px serif";x.fillText("🧀",c*T+T/2,r*T+T/2)}
+ }
+ x.font=(T*.8)+"px serif";
+ x.fillText(left>0?"🔒":"🚪",ex.c*T+T/2,ex.r*T+T/2);
+ cats.forEach(function(k){x.fillText("🐈",k.c*T+T/2,k.r*T+T/2)});
+ if(inv<=0||Math.floor(inv*8)%2===0)x.fillText("🐭",me.c*T+T/2,me.r*T+T/2);
+}
+var K={ArrowUp:[-1,0],w:[-1,0],ArrowDown:[1,0],s:[1,0],ArrowLeft:[0,-1],a:[0,-1],ArrowRight:[0,1],d:[0,1]};
+addEventListener("keydown",function(e){var d=K[e.key];if(d){e.preventDefault();move(d[0],d[1])}});
+var DP={u:[-1,0],d:[1,0],l:[0,-1],r:[0,1]};
+document.querySelectorAll("#pad button").forEach(function(b){b.addEventListener("pointerdown",function(e){e.preventDefault();var d=DP[b.dataset.k];move(d[0],d[1])})});
+var sx,sy;
+cv.addEventListener("touchstart",function(e){sx=e.touches[0].clientX;sy=e.touches[0].clientY});
+cv.addEventListener("touchend",function(e){
+ var dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;
+ if(Math.max(Math.abs(dx),Math.abs(dy))<25)return;
+ Math.abs(dx)>Math.abs(dy)?move(0,dx>0?1:-1):move(dy>0?1:-1,0);
+});
+onGo=begin;
+</script>
+</body>
+</html>
